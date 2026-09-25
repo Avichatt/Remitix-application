@@ -27,13 +27,16 @@ const PORT = 3001;
 
 const CHANNEL_NAME = 'remitxchannel';
 
-const CHAINCODE_NAME = 'remitx-settlement';
+const CHAINCODE_NAME =
+    'remitx-settlement';
 
 const MSP_ID = 'Org1MSP';
 
-const PEER_ENDPOINT = 'localhost:7051';
+const PEER_ENDPOINT =
+    'localhost:7051';
 
-const PEER_HOST_ALIAS = 'peer0.org1.example.com';
+const PEER_HOST_ALIAS =
+    'peer0.org1.example.com';
 
 
 const PROJECT_ROOT = path.resolve(
@@ -55,44 +58,67 @@ const ORG1_CRYPTO_PATH = path.join(
 );
 
 
-const CERT_DIRECTORY_PATH = path.join(
-    ORG1_CRYPTO_PATH,
-    'users',
-    'Admin@org1.example.com',
-    'msp',
-    'signcerts'
-);
-
-
-const KEY_DIRECTORY_PATH = path.join(
-    ORG1_CRYPTO_PATH,
-    'users',
-    'Admin@org1.example.com',
-    'msp',
-    'keystore'
-);
-
-
-const TLS_CERT_PATH = path.join(
-    ORG1_CRYPTO_PATH,
-    'peers',
-    'peer0.org1.example.com',
-    'tls',
-    'ca.crt'
-);
-
-
-async function getFirstFile(directoryPath) {
-
-    const files = await fs.readdir(
-        directoryPath
+const CERT_DIRECTORY_PATH =
+    path.join(
+        ORG1_CRYPTO_PATH,
+        'users',
+        'Admin@org1.example.com',
+        'msp',
+        'signcerts'
     );
 
+
+const KEY_DIRECTORY_PATH =
+    path.join(
+        ORG1_CRYPTO_PATH,
+        'users',
+        'Admin@org1.example.com',
+        'msp',
+        'keystore'
+    );
+
+
+const TLS_CERT_PATH =
+    path.join(
+        ORG1_CRYPTO_PATH,
+        'peers',
+        'peer0.org1.example.com',
+        'tls',
+        'ca.crt'
+    );
+
+
+const ALLOWED_SETTLEMENT_STATUSES = [
+    'DRUNIX_COMMITTED',
+    'SETTLEMENT_PROCESSING',
+    'SETTLED',
+    'PAYOUT_COMPLETED',
+    'SETTLEMENT_FAILED'
+];
+
+
+// -------------------------------------------------
+// FILE HELPERS
+// -------------------------------------------------
+
+async function getFirstFile(
+    directoryPath
+) {
+
+    const files =
+        await fs.readdir(
+            directoryPath
+        );
+
+
     if (files.length === 0) {
+
         throw new Error(
             `No files found in ${directoryPath}`
         );
+
     }
+
 
     return path.join(
         directoryPath,
@@ -101,6 +127,10 @@ async function getFirstFile(directoryPath) {
 }
 
 
+// -------------------------------------------------
+// FABRIC CONNECTION
+// -------------------------------------------------
+
 async function newGrpcConnection() {
 
     const tlsRootCert =
@@ -108,10 +138,12 @@ async function newGrpcConnection() {
             TLS_CERT_PATH
         );
 
+
     const tlsCredentials =
         grpc.credentials.createSsl(
             tlsRootCert
         );
+
 
     return new grpc.Client(
         PEER_ENDPOINT,
@@ -131,10 +163,12 @@ async function newIdentity() {
             CERT_DIRECTORY_PATH
         );
 
+
     const credentials =
         await fs.readFile(
             certPath
         );
+
 
     return {
         mspId: MSP_ID,
@@ -150,18 +184,23 @@ async function newSigner() {
             KEY_DIRECTORY_PATH
         );
 
+
     const privateKeyPem =
         await fs.readFile(
             keyPath
         );
+
 
     const privateKey =
         createPrivateKey(
             privateKeyPem
         );
 
-    return signers.newPrivateKeySigner(
-        privateKey
+
+    return (
+        signers.newPrivateKeySigner(
+            privateKey
+        )
     );
 }
 
@@ -171,11 +210,14 @@ async function createGatewayConnection() {
     const client =
         await newGrpcConnection();
 
+
     const identity =
         await newIdentity();
 
+
     const signer =
         await newSigner();
+
 
     const gateway = connect({
         client,
@@ -184,6 +226,7 @@ async function createGatewayConnection() {
         hash: hash.sha256
     });
 
+
     return {
         gateway,
         client
@@ -191,7 +234,61 @@ async function createGatewayConnection() {
 }
 
 
-function validateSettlementRequest(body) {
+// -------------------------------------------------
+// CONTRACT HELPER
+// -------------------------------------------------
+
+function getContract(
+    gatewayConnection
+) {
+
+    const network =
+        gatewayConnection.gateway
+            .getNetwork(
+                CHANNEL_NAME
+            );
+
+
+    return network.getContract(
+        CHAINCODE_NAME
+    );
+}
+
+
+// -------------------------------------------------
+// PARSE CHAINCODE RESPONSE
+// -------------------------------------------------
+
+function parseResult(
+    result
+) {
+
+    const text =
+        Buffer.from(
+            result
+        ).toString(
+            'utf8'
+        );
+
+
+    if (!text) {
+        return null;
+    }
+
+
+    return JSON.parse(
+        text
+    );
+}
+
+
+// -------------------------------------------------
+// CREATE VALIDATION
+// -------------------------------------------------
+
+function validateSettlementRequest(
+    body
+) {
 
     const requiredFields = [
         'transactionId',
@@ -206,67 +303,159 @@ function validateSettlementRequest(body) {
         'routeId'
     ];
 
+
     const missingFields =
         requiredFields.filter(
             field =>
-                body[field] === undefined ||
-                body[field] === null ||
-                body[field] === ''
+                body[field] ===
+                    undefined ||
+                body[field] ===
+                    null ||
+                body[field] ===
+                    ''
         );
 
-    if (missingFields.length > 0) {
+
+    if (
+        missingFields.length > 0
+    ) {
+
         throw new Error(
             `Missing required fields: ${missingFields.join(', ')}`
         );
+
     }
 
+
     const sourceAmount =
-        Number(body.sourceAmount);
+        Number(
+            body.sourceAmount
+        );
+
 
     const destinationAmount =
-        Number(body.destinationAmount);
+        Number(
+            body.destinationAmount
+        );
+
 
     const fxRate =
-        Number(body.fxRate);
+        Number(
+            body.fxRate
+        );
+
 
     if (
-        !Number.isFinite(sourceAmount) ||
+        !Number.isFinite(
+            sourceAmount
+        ) ||
         sourceAmount <= 0
     ) {
+
         throw new Error(
             'sourceAmount must be a positive number'
         );
+
     }
 
+
     if (
-        !Number.isFinite(destinationAmount) ||
+        !Number.isFinite(
+            destinationAmount
+        ) ||
         destinationAmount <= 0
     ) {
+
         throw new Error(
             'destinationAmount must be a positive number'
         );
+
     }
 
+
     if (
-        !Number.isFinite(fxRate) ||
+        !Number.isFinite(
+            fxRate
+        ) ||
         fxRate <= 0
     ) {
+
         throw new Error(
             'fxRate must be a positive number'
         );
+
     }
 
-    if (body.riskStatus !== 'APPROVED') {
+
+    if (
+        body.riskStatus !==
+        'APPROVED'
+    ) {
+
         throw new Error(
             'Only APPROVED settlements can be submitted to Drunix'
         );
+
     }
 }
 
 
+// -------------------------------------------------
+// STATUS VALIDATION
+// -------------------------------------------------
+
+function validateStatusUpdate(
+    body
+) {
+
+    if (
+        !body ||
+        !body.status
+    ) {
+
+        throw new Error(
+            'status is required'
+        );
+
+    }
+
+
+    const status =
+        String(
+            body.status
+        )
+            .trim()
+            .toUpperCase();
+
+
+    if (
+        !ALLOWED_SETTLEMENT_STATUSES
+            .includes(
+                status
+            )
+    ) {
+
+        throw new Error(
+            `Invalid settlement status: ${status}`
+        );
+
+    }
+
+
+    return status;
+}
+
+
+// -------------------------------------------------
+// HEALTH
+// -------------------------------------------------
+
 app.get(
     '/health',
-    async (req, res) => {
+    async (
+        req,
+        res
+    ) => {
 
         try {
 
@@ -274,56 +463,70 @@ app.get(
                 TLS_CERT_PATH
             );
 
-            const certPath =
-                await getFirstFile(
-                    CERT_DIRECTORY_PATH
-                );
 
-            const keyPath =
-                await getFirstFile(
-                    KEY_DIRECTORY_PATH
-                );
+            await getFirstFile(
+                CERT_DIRECTORY_PATH
+            );
+
+
+            await getFirstFile(
+                KEY_DIRECTORY_PATH
+            );
+
 
             res.json({
                 status: 'UP',
+
                 service:
                     'REMITX Drunix Gateway',
+
                 channel:
                     CHANNEL_NAME,
+
                 chaincode:
                     CHAINCODE_NAME,
+
                 peer:
                     PEER_ENDPOINT,
+
                 msp:
                     MSP_ID,
-                credentialsAvailable: true,
-                credentialPaths: {
-                    tlsCertificate:
-                        TLS_CERT_PATH,
-                    identityCertificate:
-                        certPath,
-                    privateKey:
-                        keyPath
-                }
+
+                credentialsAvailable:
+                    true
             });
+
 
         } catch (error) {
 
-            res.status(500).json({
-                status: 'DOWN',
-                error:
-                    error.message
-            });
+            res
+                .status(500)
+                .json({
+                    status: 'DOWN',
+
+                    error:
+                        error.message
+                });
+
         }
     }
 );
 
 
+// -------------------------------------------------
+// CREATE SETTLEMENT
+// -------------------------------------------------
+
 app.post(
     '/api/drunix/settlements',
-    async (req, res) => {
+
+    async (
+        req,
+        res
+    ) => {
 
         let gatewayConnection;
+
 
         try {
 
@@ -331,80 +534,91 @@ app.post(
                 req.body
             );
 
+
             gatewayConnection =
                 await createGatewayConnection();
 
-            const network =
-                gatewayConnection.gateway
-                    .getNetwork(
-                        CHANNEL_NAME
-                    );
 
             const contract =
-                network.getContract(
-                    CHAINCODE_NAME
+                getContract(
+                    gatewayConnection
                 );
+
 
             const result =
-                await contract.submitTransaction(
-                    'CreateSettlement',
+                await contract
+                    .submitTransaction(
+                        'CreateSettlement',
 
-                    String(
-                        req.body.transactionId
-                    ),
+                        String(
+                            req.body
+                                .transactionId
+                        ),
 
-                    String(
-                        req.body.senderCountry
-                    ),
+                        String(
+                            req.body
+                                .senderCountry
+                        ),
 
-                    String(
-                        req.body.beneficiaryCountry
-                    ),
+                        String(
+                            req.body
+                                .beneficiaryCountry
+                        ),
 
-                    String(
-                        req.body.sourceCurrency
-                    ),
+                        String(
+                            req.body
+                                .sourceCurrency
+                        ),
 
-                    String(
-                        req.body.sourceAmount
-                    ),
+                        String(
+                            req.body
+                                .sourceAmount
+                        ),
 
-                    String(
-                        req.body.destinationCurrency
-                    ),
+                        String(
+                            req.body
+                                .destinationCurrency
+                        ),
 
-                    String(
-                        req.body.destinationAmount
-                    ),
+                        String(
+                            req.body
+                                .destinationAmount
+                        ),
 
-                    String(
-                        req.body.fxRate
-                    ),
+                        String(
+                            req.body
+                                .fxRate
+                        ),
 
-                    String(
-                        req.body.riskStatus
-                    ),
+                        String(
+                            req.body
+                                .riskStatus
+                        ),
 
-                    String(
-                        req.body.routeId
-                    )
-                );
+                        String(
+                            req.body
+                                .routeId
+                        )
+                    );
+
 
             const settlement =
-                JSON.parse(
-                    Buffer.from(
-                        result
-                    ).toString(
-                        'utf8'
-                    )
+                parseResult(
+                    result
                 );
 
-            res.status(201).json({
-                success: true,
-                message:
-                    'Settlement committed to Drunix',
-                settlement
-            });
+
+            res
+                .status(201)
+                .json({
+                    success: true,
+
+                    message:
+                        'Settlement committed to Drunix',
+
+                    settlement
+                });
+
 
         } catch (error) {
 
@@ -413,9 +627,11 @@ app.post(
                 error
             );
 
+
             const message =
                 error.message ||
                 'Unknown Drunix error';
+
 
             const isValidationError =
                 message.startsWith(
@@ -428,71 +644,88 @@ app.post(
                     'Only APPROVED settlements'
                 );
 
-            res.status(
-                isValidationError
-                    ? 400
-                    : 500
-            ).json({
-                success: false,
-                error: message
-            });
+
+            res
+                .status(
+                    isValidationError
+                        ? 400
+                        : 500
+                )
+                .json({
+                    success: false,
+                    error: message
+                });
+
 
         } finally {
 
-            if (gatewayConnection) {
+            if (
+                gatewayConnection
+            ) {
 
-                gatewayConnection.gateway
+                gatewayConnection
+                    .gateway
                     .close();
 
-                gatewayConnection.client
+
+                gatewayConnection
+                    .client
                     .close();
+
             }
         }
     }
 );
 
 
+// -------------------------------------------------
+// GET SETTLEMENT
+// -------------------------------------------------
+
 app.get(
     '/api/drunix/settlements/:transactionId',
-    async (req, res) => {
+
+    async (
+        req,
+        res
+    ) => {
 
         let gatewayConnection;
+
 
         try {
 
             gatewayConnection =
                 await createGatewayConnection();
 
-            const network =
-                gatewayConnection.gateway
-                    .getNetwork(
-                        CHANNEL_NAME
-                    );
 
             const contract =
-                network.getContract(
-                    CHAINCODE_NAME
+                getContract(
+                    gatewayConnection
                 );
+
 
             const result =
-                await contract.evaluateTransaction(
-                    'GetSettlement',
-                    req.params.transactionId
-                );
+                await contract
+                    .evaluateTransaction(
+                        'GetSettlement',
+
+                        req.params
+                            .transactionId
+                    );
+
 
             const settlement =
-                JSON.parse(
-                    Buffer.from(
-                        result
-                    ).toString(
-                        'utf8'
-                    )
+                parseResult(
+                    result
                 );
+
 
             res.json({
                 success: true,
                 settlement
             });
+
 
         } catch (error) {
 
@@ -501,72 +734,94 @@ app.get(
                 error
             );
 
-            res.status(500).json({
-                success: false,
-                error:
-                    error.message
-            });
+
+            res
+                .status(500)
+                .json({
+                    success: false,
+
+                    error:
+                        error.message
+                });
+
 
         } finally {
 
-            if (gatewayConnection) {
+            if (
+                gatewayConnection
+            ) {
 
-                gatewayConnection.gateway
+                gatewayConnection
+                    .gateway
                     .close();
 
-                gatewayConnection.client
+
+                gatewayConnection
+                    .client
                     .close();
+
             }
         }
     }
 );
 
 
+// -------------------------------------------------
+// GET SETTLEMENT HISTORY
+// -------------------------------------------------
+
 app.get(
     '/api/drunix/settlements/:transactionId/history',
-    async (req, res) => {
+
+    async (
+        req,
+        res
+    ) => {
 
         let gatewayConnection;
+
 
         try {
 
             gatewayConnection =
                 await createGatewayConnection();
 
-            const network =
-                gatewayConnection.gateway
-                    .getNetwork(
-                        CHANNEL_NAME
-                    );
 
             const contract =
-                network.getContract(
-                    CHAINCODE_NAME
+                getContract(
+                    gatewayConnection
                 );
+
 
             const result =
-                await contract.evaluateTransaction(
-                    'GetSettlementHistory',
-                    req.params.transactionId
-                );
+                await contract
+                    .evaluateTransaction(
+                        'GetSettlementHistory',
+
+                        req.params
+                            .transactionId
+                    );
+
 
             const history =
-                JSON.parse(
-                    Buffer.from(
-                        result
-                    ).toString(
-                        'utf8'
-                    )
-                );
+                parseResult(
+                    result
+                ) ?? [];
+
 
             res.json({
                 success: true,
+
                 transactionId:
-                    req.params.transactionId,
+                    req.params
+                        .transactionId,
+
                 eventCount:
                     history.length,
+
                 history
             });
+
 
         } catch (error) {
 
@@ -575,29 +830,177 @@ app.get(
                 error
             );
 
-            res.status(500).json({
-                success: false,
-                error:
-                    error.message
-            });
+
+            res
+                .status(500)
+                .json({
+                    success: false,
+
+                    error:
+                        error.message
+                });
+
 
         } finally {
 
-            if (gatewayConnection) {
+            if (
+                gatewayConnection
+            ) {
 
-                gatewayConnection.gateway
+                gatewayConnection
+                    .gateway
                     .close();
 
-                gatewayConnection.client
+
+                gatewayConnection
+                    .client
                     .close();
+
             }
         }
     }
 );
 
 
+// -------------------------------------------------
+// UPDATE SETTLEMENT STATUS
+// -------------------------------------------------
+
+app.put(
+    '/api/drunix/settlements/:transactionId/status',
+
+    async (
+        req,
+        res
+    ) => {
+
+        let gatewayConnection;
+
+
+        try {
+
+            const transactionId =
+                String(
+                    req.params
+                        .transactionId
+                ).trim();
+
+
+            if (!transactionId) {
+
+                throw new Error(
+                    'transactionId is required'
+                );
+
+            }
+
+
+            const status =
+                validateStatusUpdate(
+                    req.body
+                );
+
+
+            gatewayConnection =
+                await createGatewayConnection();
+
+
+            const contract =
+                getContract(
+                    gatewayConnection
+                );
+
+
+            const result =
+                await contract
+                    .submitTransaction(
+                        'UpdateSettlementStatus',
+
+                        transactionId,
+
+                        status
+                    );
+
+
+            const settlement =
+                parseResult(
+                    result
+                );
+
+
+            res.json({
+                success: true,
+
+                message:
+                    'Settlement status updated on Drunix',
+
+                settlement
+            });
+
+
+        } catch (error) {
+
+            console.error(
+                'Drunix status update failed:',
+                error
+            );
+
+
+            const message =
+                error.message ||
+                'Unknown Drunix error';
+
+
+            const validationError =
+                message ===
+                    'status is required' ||
+                message ===
+                    'transactionId is required' ||
+                message.startsWith(
+                    'Invalid settlement status'
+                );
+
+
+            res
+                .status(
+                    validationError
+                        ? 400
+                        : 500
+                )
+                .json({
+                    success: false,
+                    error: message
+                });
+
+
+        } finally {
+
+            if (
+                gatewayConnection
+            ) {
+
+                gatewayConnection
+                    .gateway
+                    .close();
+
+
+                gatewayConnection
+                    .client
+                    .close();
+
+            }
+        }
+    }
+);
+
+
+// -------------------------------------------------
+// START SERVER
+// -------------------------------------------------
+
 app.listen(
     PORT,
+
     () => {
 
         console.log(
@@ -630,6 +1033,10 @@ app.listen(
 
         console.log(
             `MSP: ${MSP_ID}`
+        );
+
+        console.log(
+            'Status update endpoint: ENABLED'
         );
 
         console.log(
