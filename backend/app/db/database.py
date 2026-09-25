@@ -1,25 +1,39 @@
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, DeclarativeBase
+from sqlalchemy.orm import declarative_base
+from sqlalchemy.orm import sessionmaker
 
-DATABASE_URL = "postgresql://remitx:remitx_password@localhost:5433/remitx"
 
-engine = create_engine(DATABASE_URL)
-
-SessionLocal = sessionmaker(
-    bind=engine,
-    autoflush=False,
-    autocommit=False
+DATABASE_URL = (
+    "postgresql://"
+    "remitx:"
+    "remitx_password@"
+    "localhost:"
+    "5440/"
+    "remitx"
 )
 
 
-class Base(DeclarativeBase):
-    pass
+engine = create_engine(
+    DATABASE_URL
+)
+
+
+SessionLocal = sessionmaker(
+    autocommit=False,
+    autoflush=False,
+    bind=engine
+)
+
+
+Base = declarative_base()
 
 
 def get_db():
+
     db = SessionLocal()
 
     try:
         yield db
+
     finally:
         db.close()
